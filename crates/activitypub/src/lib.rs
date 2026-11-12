@@ -1,9 +1,9 @@
 //! ActivityPub objects and the public reader.
 //!
-//! This crate is deliberately separate from [`nodus-instance`](../nodus_instance/index.html):
+//! This crate is deliberately separate from the client adapters in `nodus-sdk`:
 //! Mastodon's REST API and ActivityPub are different protocols with different shapes, and
-//! keeping them apart stops one protocol's quirks leaking into the other. The native
-//! client only reads public objects; signing and delivering activities live in `nodus-federation`.
+//! keeping them apart stops one protocol's quirks leaking into the other. The reader only
+//! reads public objects; signing and delivering activities live in `nodus-federation`.
 
 #[cfg(feature = "read")]
 pub mod actor;
