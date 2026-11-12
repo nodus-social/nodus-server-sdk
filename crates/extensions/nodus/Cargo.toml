@@ -1,0 +1,16 @@
+[package]
+name = "nodus-performance-sdk"
+description = "Nodus performance protocol: batch, events and state synchronisation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

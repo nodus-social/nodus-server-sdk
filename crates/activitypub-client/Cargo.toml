@@ -1,0 +1,19 @@
+[package]
+name = "nodus-activitypub-client"
+description = "Read-only ActivityPub client transport."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+nodus-activitypub-core = { path = "../activitypub-core", version = "0.1.0" }
+reqwest = { workspace = true }
+serde_json.workspace = true
+url.workspace = true
+urlencoding = "2"
+
+[lints]
+workspace = true

@@ -13,3 +13,12 @@ pub use nodus_activitypub_sdk as activitypub;
 
 #[cfg(feature = "federation")]
 pub use nodus_federation as federation;
+
+#[cfg(feature = "mastodon")]
+pub use nodus_mastodon_sdk as mastodon;
+
+#[cfg(feature = "nodus")]
+pub use nodus_performance_sdk as nodus;
+
+#[cfg(feature = "service")]
+pub use nodus_service_sdk as service;

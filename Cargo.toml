@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/activitypub", "crates/federation", "crates/server"]
+members = [
+    "crates/activitypub",
+    "crates/activitypub-core",
+    "crates/activitypub-client",
+    "crates/federation",
+    "crates/extensions/mastodon",
+    "crates/extensions/nodus",
+    "crates/service",
+    "crates/server",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,8 +21,14 @@ repository = "https://github.com/nodus-social/nodus-server-sdk"
 
 [workspace.dependencies]
 nodus-activitypub-sdk = { path = "crates/activitypub", version = "0.1.0" }
+nodus-activitypub-core = { path = "crates/activitypub-core", version = "0.1.0" }
+nodus-activitypub-client = { path = "crates/activitypub-client", version = "0.1.0" }
 nodus-federation = { path = "crates/federation", version = "0.1.0" }
+nodus-mastodon-sdk = { path = "crates/extensions/mastodon", version = "0.1.0" }
+nodus-performance-sdk = { path = "crates/extensions/nodus", version = "0.1.0" }
 nodus-server-sdk = { path = "crates/server", version = "0.1.0" }
+nodus-service-sdk = { path = "crates/service", version = "0.1.0" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

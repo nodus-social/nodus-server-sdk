@@ -1,14 +1,19 @@
 //! Ordered and unordered ActivityPub collections.
+//!
+//! The reader and the server share these types: an instance builds the same
+//! `Collection` and `CollectionPage` documents a peer parses, so a round trip through
+//! JSON cannot drift into two subtly different shapes.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::Error;
 use crate::actor::{link, string, total_items};
+use crate::context::activity_context;
 
 /// A collection's header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Collection {
-    /// `OrderedCollection` or `Collection`.
+    /// Canonical collection id.
     pub id: String,
     /// Number of members when the origin publishes it.
     pub total_items: u64,
@@ -29,6 +34,25 @@ impl Collection {
             total_items: total_items(Some(value)),
             first: link(value.get("first")),
         })
+    }
+
+    /// An `OrderedCollection` document. Mastodon and Misskey both accept this shape
+    /// for followers, following and outbox.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let mut value = json!({
+            "@context": activity_context(),
+            "id": self.id,
+            "type": "OrderedCollection",
+            "totalItems": self.total_items,
+        });
+        if let Some(first) = &self.first {
+            value
+                .as_object_mut()
+                .expect("collection is an object")
+                .insert("first".to_owned(), json!(first));
+        }
+        value
     }
 }
 
@@ -60,5 +84,28 @@ impl CollectionPage {
             next: link(value.get("next")),
             total_items: total_items(Some(value)),
         })
+    }
+
+    /// The page document an instance serves when a client follows `first`.
+    ///
+    /// `id` is the page's own URL and `part_of` the collection header, which is what
+    /// tells a consumer that this page is not the whole collection.
+    #[must_use]
+    pub fn to_json(&self, id: &str, part_of: &str) -> Value {
+        let mut value = json!({
+            "@context": activity_context(),
+            "id": id,
+            "type": "OrderedCollectionPage",
+            "partOf": part_of,
+            "totalItems": self.total_items,
+            "orderedItems": self.items,
+        });
+        if let Some(next) = &self.next {
+            value
+                .as_object_mut()
+                .expect("collection page is an object")
+                .insert("next".to_owned(), json!(next));
+        }
+        value
     }
 }

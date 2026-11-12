@@ -3,8 +3,8 @@
 use serde_json::Value;
 use url::Url;
 
-use crate::actor::link;
-use crate::{Actor, Collection, CollectionPage, Error, Note};
+use nodus_activitypub_core::actor::link;
+use nodus_activitypub_core::{Actor, Collection, CollectionPage, Error, Note};
 
 /// A read-only ActivityPub client.
 #[derive(Debug, Clone)]

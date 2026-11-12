@@ -12,12 +12,18 @@ repository.workspace = true
 default = ["activitypub"]
 activitypub = ["dep:nodus-activitypub-sdk"]
 federation = ["dep:nodus-federation"]
+mastodon = ["dep:nodus-mastodon-sdk"]
+nodus = ["dep:nodus-performance-sdk"]
+service = ["dep:nodus-service-sdk"]
 native = ["nodus-activitypub-sdk/native", "nodus-federation/native"]
 crypto = ["nodus-federation/crypto"]
 
 [dependencies]
-nodus-activitypub-sdk = { workspace = true, optional = true, features = ["read"] }
+nodus-activitypub-sdk = { workspace = true, optional = true }
 nodus-federation = { workspace = true, optional = true }
+nodus-mastodon-sdk = { workspace = true, optional = true }
+nodus-performance-sdk = { workspace = true, optional = true }
+nodus-service-sdk = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -1,16 +1,37 @@
 # nodus-server-sdk
 
-Server-side protocol primitives for Nodus services.
+Server-side protocol primitives for Nodus services. ActivityPub is the core
+protocol; every implementation dialect is a separate opt-in crate.
 
 | Crate | Purpose |
 | --- | --- |
-| `nodus-activitypub-sdk` | ActivityPub actors, notes, collections, WebFinger and the public reader. |
-| `nodus-federation` | Activities, HTTP signatures, delivery and inbox policy. |
-| `nodus-server-sdk` | Facade that re-exports the two with feature gates. |
+| `nodus-activitypub-core` | ActivityPub types, actors, notes, collections, activities and WebFinger. No transport, no server, no implementation quirks. |
+| `nodus-activitypub-client` | Read-only ActivityPub transport over HTTPS. |
+| `nodus-activitypub-sdk` | Facade over the protocol core; `native` adds the reader. |
+| `nodus-federation` | HTTP signatures, delivery and inbox policy. |
+| `nodus-mastodon-sdk` | Mastodon-compatible endpoint wire types (extension). |
+| `nodus-performance-sdk` | Nodus batch, events and state-sync wire types (extension). |
+| `nodus-service-sdk` | Shared-secret authentication for internal gRPC calls. |
+| `nodus-server-sdk` | Facade that composes the crates with feature gates. |
 
-It deliberately contains no HTTP server, database or client state. Services such
-as `nodus-hydrator` compose it with their own storage and transport.
+The split is intentional:
+
+```
+ActivityPub protocol  ->  extension layer  ->  host application
+activitypub-core          mastodon              storage, HTTP, policy
+activitypub-client        performance
+federation
+```
+
+`activitypub-core` must never depend on `mastodon`, `performance`, HTTP or a
+database. Extensions must never leak their endpoint shapes into the protocol
+types. The facade only re-exports; it does not define behaviour.
 
 ```toml
-nodus-server-sdk = { path = "../server-sdk/crates/server", features = ["native", "federation", "crypto"] }
+nodus-server-sdk = { path = "../server-sdk/crates/server", features = ["activitypub", "native", "federation", "crypto", "service"] }
 ```
+
+Every internal gRPC call carries `x-nodus-service-secret`; servers validate it in
+their interceptor with `nodus_service_sdk::SharedSecret::verify`, clients attach
+it with `attach`. Empty or missing secrets are configuration errors, not open
+access.

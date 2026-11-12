@@ -1,6 +1,6 @@
 [package]
 name = "nodus-activitypub-sdk"
-description = "ActivityPub objects and the public reader."
+description = "ActivityPub protocol facade; the reader is opt-in."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,14 +9,12 @@ publish.workspace = true
 repository.workspace = true
 
 [features]
-default = ["read"]
-read = []
-native = ["read", "dep:reqwest"]
+default = []
+native = ["dep:nodus-activitypub-client"]
 
 [dependencies]
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots"], optional = true }
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-urlencoding = "2"
-url.workspace = true
+nodus-activitypub-core = { path = "../activitypub-core", version = "0.1.0" }
+nodus-activitypub-client = { path = "../activitypub-client", version = "0.1.0", optional = true }
+
+[lints]
+workspace = true
