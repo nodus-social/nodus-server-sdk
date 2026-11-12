@@ -36,3 +36,17 @@ Every internal gRPC call carries `x-nodus-service-secret`; servers validate it i
 their interceptor with `nodus_service_sdk::SharedSecret::verify`, clients attach
 it with `attach`. Empty or missing secrets are configuration errors, not open
 access.
+
+## Misskey extension
+
+`nodus-misskey-sdk` is opt-in and stays outside the protocol core. It models the
+Misskey client surface (`/api/*`, MiAuth, `/streaming`) separately from the
+Mastodon API, plus the Misskey ActivityPub dialect (`_misskey_content`,
+`question`, `renote`, `reactions`).
+
+Rich notes are represented directly: `Note` carries CW, visibility, files,
+polls, custom emoji, renotes/replies and reaction counts; `Reaction` validates
+Unicode or `:shortcode@host:` values before they reach storage. The SDK does not
+render MFM or HTML. A host converts note source into sanitised `content_html`
+for federation and lets the shared UI render an allow-listed MFM subset with
+CSS animations, honouring `prefers-reduced-motion`.
