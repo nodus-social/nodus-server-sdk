@@ -1,0 +1,23 @@
+[package]
+name = "nodus-server-sdk"
+description = "Server-side protocol SDK: ActivityPub and federation primitives."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[features]
+default = ["activitypub"]
+activitypub = ["dep:nodus-activitypub-sdk"]
+federation = ["dep:nodus-federation"]
+native = ["nodus-activitypub-sdk/native", "nodus-federation/native"]
+crypto = ["nodus-federation/crypto"]
+
+[dependencies]
+nodus-activitypub-sdk = { workspace = true, optional = true, features = ["read"] }
+nodus-federation = { workspace = true, optional = true }
+
+[lints]
+workspace = true
