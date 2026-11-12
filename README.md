@@ -34,8 +34,9 @@ nodus-server-sdk = { path = "../server-sdk/crates/server", features = ["activity
 
 Every internal gRPC call carries `x-nodus-service-secret`; servers validate it in
 their interceptor with `nodus_service_sdk::SharedSecret::verify`, clients attach
-it with `attach`. Empty or missing secrets are configuration errors, not open
-access.
+it with `attach`. Enable `grpc` on `nodus-service-sdk` for the tonic
+`ClientSecret` interceptor and `grpc::verify`. Empty or missing secrets are
+configuration errors, not open access.
 
 ## Misskey extension
 

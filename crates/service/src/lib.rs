@@ -64,6 +64,75 @@ impl fmt::Debug for SharedSecret {
     }
 }
 
+/// gRPC transport integration.
+///
+/// The interceptor attaches the secret on the client and verifies it on the
+/// server. The secret never appears in a status message or log line.
+#[cfg(feature = "grpc")]
+pub mod grpc {
+    use tonic::metadata::MetadataValue;
+    use tonic::service::Interceptor;
+    use tonic::{Request, Status};
+
+    use super::{SHARED_SECRET_HEADER, SharedSecret};
+
+    /// Client interceptor that attaches the configured secret to every call.
+    #[derive(Clone, Debug)]
+    pub struct ClientSecret {
+        secret: SharedSecret,
+    }
+
+    impl ClientSecret {
+        /// Build a client interceptor.
+        #[must_use]
+        pub fn new(secret: SharedSecret) -> Self {
+            Self { secret }
+        }
+    }
+
+    impl Interceptor for ClientSecret {
+        fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+            let value: MetadataValue<tonic::metadata::Ascii> = self
+                .secret
+                .attach()
+                .parse()
+                .map_err(|_| Status::internal("service secret is not valid metadata"))?;
+            request.metadata_mut().insert(SHARED_SECRET_HEADER, value);
+            Ok(request)
+        }
+    }
+
+    /// Server-side check for one request.
+    pub fn verify<T>(secret: &SharedSecret, request: &Request<T>) -> Result<(), Status> {
+        let presented = request
+            .metadata()
+            .get(SHARED_SECRET_HEADER)
+            .and_then(|value| value.to_str().ok());
+        secret
+            .verify(presented)
+            .map_err(|_| Status::unauthenticated("service is not authenticated"))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_client_attaches_the_secret_and_the_server_verifies_it() {
+            let secret = SharedSecret::new("s3cret").expect("secret");
+            let mut interceptor = ClientSecret::new(secret.clone());
+            let request = interceptor.call(Request::new(())).expect("call");
+            assert!(verify(&secret, &request).is_ok());
+        }
+
+        #[test]
+        fn a_request_without_the_secret_is_rejected() {
+            let secret = SharedSecret::new("s3cret").expect("secret");
+            assert!(verify(&secret, &Request::new(())).is_err());
+        }
+    }
+}
+
 /// Why service authentication failed.
 #[derive(Debug, Error)]
 pub enum Error {

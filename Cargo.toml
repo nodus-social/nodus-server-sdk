@@ -38,6 +38,7 @@ url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "webpki-roots"] }
 rsa = { version = "0.9", features = ["sha2"] }
 sha2 = "0.10"
+tonic = { version = "0.14", default-features = false }
 base64 = "0.22"
 
 [workspace.lints.rust]

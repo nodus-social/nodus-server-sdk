@@ -10,6 +10,11 @@ repository.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+tonic = { workspace = true, optional = true }
+
+[features]
+default = []
+grpc = ["dep:tonic"]
 
 [lints]
 workspace = true
