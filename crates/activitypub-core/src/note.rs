@@ -1,6 +1,6 @@
 //! A public note, reduced to what a card draws.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::Error;
 use crate::actor::{Emoji, emojis, link, string, total_items};
@@ -84,7 +84,27 @@ pub struct Note {
     pub cc: Vec<String>,
     /// Mentioned actor ids, rendered as `Mention` tags.
     pub mentions: Vec<String>,
+    /// Properties this crate does not model, preserved for a lossless round trip.
+    pub extra: Map<String, Value>,
 }
+
+const NOTE_KEYS: &[&str] = &[
+    "@context",
+    "id",
+    "type",
+    "url",
+    "content",
+    "published",
+    "sensitive",
+    "summary",
+    "attachment",
+    "tag",
+    "inReplyTo",
+    "replies",
+    "attributedTo",
+    "to",
+    "cc",
+];
 
 impl Note {
     /// Parse a `Note`, or the `object` of a `Create`.
@@ -120,6 +140,7 @@ impl Note {
             to: audience(object.get("to")),
             cc: audience(object.get("cc")),
             mentions: mentions(object.get("tag")),
+            extra: crate::extra_fields(object, NOTE_KEYS),
         })
     }
 
@@ -141,6 +162,11 @@ impl Note {
             "cc": self.cc,
         });
         let map = value.as_object_mut().expect("note is an object");
+        map.extend(
+            self.extra
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         if let Some(author) = &self.attributed_to {
             map.insert("attributedTo".to_owned(), json!(author));
         }

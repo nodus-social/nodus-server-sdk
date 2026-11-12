@@ -13,6 +13,7 @@ default = ["activitypub"]
 activitypub = ["dep:nodus-activitypub-sdk"]
 federation = ["dep:nodus-federation"]
 mastodon = ["dep:nodus-mastodon-sdk"]
+misskey = ["dep:nodus-misskey-sdk"]
 nodus = ["dep:nodus-performance-sdk"]
 service = ["dep:nodus-service-sdk"]
 native = ["nodus-activitypub-sdk/native", "nodus-federation/native"]
@@ -22,6 +23,7 @@ crypto = ["nodus-federation/crypto"]
 nodus-activitypub-sdk = { workspace = true, optional = true }
 nodus-federation = { workspace = true, optional = true }
 nodus-mastodon-sdk = { workspace = true, optional = true }
+nodus-misskey-sdk = { workspace = true, optional = true }
 nodus-performance-sdk = { workspace = true, optional = true }
 nodus-service-sdk = { workspace = true, optional = true }
 

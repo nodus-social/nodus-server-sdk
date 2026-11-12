@@ -17,6 +17,9 @@ pub use nodus_federation as federation;
 #[cfg(feature = "mastodon")]
 pub use nodus_mastodon_sdk as mastodon;
 
+#[cfg(feature = "misskey")]
+pub use nodus_misskey_sdk as misskey;
+
 #[cfg(feature = "nodus")]
 pub use nodus_performance_sdk as nodus;
 

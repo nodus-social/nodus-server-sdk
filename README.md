@@ -10,6 +10,7 @@ protocol; every implementation dialect is a separate opt-in crate.
 | `nodus-activitypub-sdk` | Facade over the protocol core; `native` adds the reader. |
 | `nodus-federation` | HTTP signatures, delivery and inbox policy. |
 | `nodus-mastodon-sdk` | Mastodon-compatible endpoint wire types (extension). |
+| `nodus-misskey-sdk` | Misskey client API, MiAuth, streaming, reactions and ActivityPub dialect types (extension). |
 | `nodus-performance-sdk` | Nodus batch, events and state-sync wire types (extension). |
 | `nodus-service-sdk` | Shared-secret authentication for internal gRPC calls. |
 | `nodus-server-sdk` | Facade that composes the crates with feature gates. |
@@ -19,8 +20,8 @@ The split is intentional:
 ```
 ActivityPub protocol  ->  extension layer  ->  host application
 activitypub-core          mastodon              storage, HTTP, policy
-activitypub-client        performance
-federation
+activitypub-client        misskey
+federation                performance
 ```
 
 `activitypub-core` must never depend on `mastodon`, `performance`, HTTP or a
@@ -28,7 +29,7 @@ database. Extensions must never leak their endpoint shapes into the protocol
 types. The facade only re-exports; it does not define behaviour.
 
 ```toml
-nodus-server-sdk = { path = "../server-sdk/crates/server", features = ["activitypub", "native", "federation", "crypto", "service"] }
+nodus-server-sdk = { path = "../server-sdk/crates/server", features = ["activitypub", "native", "federation", "crypto", "service", "misskey"] }
 ```
 
 Every internal gRPC call carries `x-nodus-service-secret`; servers validate it in

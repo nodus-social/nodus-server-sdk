@@ -48,3 +48,21 @@ pub enum Error {
     #[error("activitypub read failed: {0}")]
     Transport(String),
 }
+
+/// Fields this crate does not model, kept so a round trip does not erase another
+/// implementation's properties.
+pub(crate) fn extra_fields(
+    value: &serde_json::Value,
+    known: &[&str],
+) -> serde_json::Map<String, serde_json::Value> {
+    value
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .filter(|(key, _)| !known.contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}

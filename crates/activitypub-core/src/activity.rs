@@ -4,7 +4,7 @@
 //! `Activity`, signs the request with `nodus-federation`, and posts it to a peer's
 //! inbox; the peer parses the same document with [`Activity::from_json`].
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::Error;
 use crate::actor::string;
@@ -144,7 +144,11 @@ pub struct Activity {
     pub to: Vec<String>,
     /// Secondary audience.
     pub cc: Vec<String>,
+    /// Properties this crate does not model, preserved for a lossless round trip.
+    pub extra: Map<String, Value>,
 }
+
+const ACTIVITY_KEYS: &[&str] = &["@context", "id", "type", "actor", "object", "to", "cc"];
 
 impl Activity {
     /// Builds an activity without an id; [`Self::with_id`] adds one.
@@ -161,6 +165,7 @@ impl Activity {
             object: object.into(),
             to: Vec::new(),
             cc: Vec::new(),
+            extra: Map::new(),
         }
     }
 
@@ -253,6 +258,7 @@ impl Activity {
             object,
             to: audience(value.get("to")),
             cc: audience(value.get("cc")),
+            extra: crate::extra_fields(value, ACTIVITY_KEYS),
         })
     }
 
@@ -267,6 +273,11 @@ impl Activity {
             "object": self.object.to_json(),
         });
         let map = value.as_object_mut().expect("activity is an object");
+        map.extend(
+            self.extra
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         if let Some(id) = &self.id {
             map.insert("id".to_owned(), json!(id));
         }
@@ -328,6 +339,7 @@ mod tests {
             to: vec![PUBLIC.into()],
             cc: Vec::new(),
             mentions: Vec::new(),
+            extra: Map::new(),
         };
         let activity = Activity::create("https://a.example/users/a", &note);
         let parsed = Activity::from_json(&activity.to_json()).expect("round trip");

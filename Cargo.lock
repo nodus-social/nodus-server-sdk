@@ -753,6 +753,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nodus-misskey-sdk"
+version = "0.1.0"
+dependencies = [
+ "nodus-activitypub-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "nodus-performance-sdk"
 version = "0.1.0"
 dependencies = [
@@ -767,6 +777,7 @@ dependencies = [
  "nodus-activitypub-sdk",
  "nodus-federation",
  "nodus-mastodon-sdk",
+ "nodus-misskey-sdk",
  "nodus-performance-sdk",
  "nodus-service-sdk",
 ]

@@ -1,6 +1,6 @@
 //! An ActivityPub actor, reduced to the fields a reader can see.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::Error;
 use crate::context::{PUBLIC, activity_context};
@@ -72,7 +72,32 @@ pub struct Actor {
     pub indexable: bool,
     /// Whether new follows require approval.
     pub manually_approves_followers: bool,
+    /// Properties this crate does not model (for example Misskey or Mastodon
+    /// extensions), preserved for a lossless round trip.
+    pub extra: Map<String, Value>,
 }
+
+const ACTOR_KEYS: &[&str] = &[
+    "@context",
+    "id",
+    "type",
+    "preferredUsername",
+    "name",
+    "summary",
+    "url",
+    "icon",
+    "image",
+    "followers",
+    "following",
+    "outbox",
+    "inbox",
+    "endpoints",
+    "publicKey",
+    "published",
+    "discoverable",
+    "indexable",
+    "manuallyApprovesFollowers",
+];
 
 impl Actor {
     /// Read the fields this crate understands.
@@ -128,6 +153,7 @@ impl Actor {
                 .get("manuallyApprovesFollowers")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            extra: crate::extra_fields(value, ACTOR_KEYS),
         })
     }
 
@@ -151,6 +177,11 @@ impl Actor {
             "manuallyApprovesFollowers": self.manually_approves_followers,
         });
         let map = value.as_object_mut().expect("actor document is an object");
+        map.extend(
+            self.extra
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
         if let Some(avatar) = &self.avatar {
             map.insert("icon".to_owned(), json!({ "type": "Image", "url": avatar }));
         }
