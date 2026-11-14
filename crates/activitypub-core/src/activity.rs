@@ -4,6 +4,7 @@
 //! `Activity`, signs the request with `nodus-federation`, and posts it to a peer's
 //! inbox; the peer parses the same document with [`Activity::from_json`].
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::Error;
@@ -11,7 +12,7 @@ use crate::actor::string;
 use crate::context::activity_context;
 
 /// The activity verbs this crate can represent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivityKind {
     /// A new object was published.
     Create,
@@ -109,6 +110,34 @@ impl ActivityObject {
             Self::Activity(activity) => activity.to_json(),
         }
     }
+
+    /// Parses an activity object from JSON: either a string URI, an embedded activity,
+    /// or an embedded object (such as a Note or Tombstone).
+    ///
+    /// # Errors
+    /// [`Error::Object`] when the value is not a string or object.
+    pub fn from_json(value: &Value) -> Result<Self, Error> {
+        match value {
+            Value::String(id) => Ok(Self::Id(id.clone())),
+            Value::Object(_) => {
+                if value
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .and_then(ActivityKind::parse)
+                    .is_some()
+                    && value.get("actor").is_some()
+                {
+                    if let Ok(activity) = Activity::from_json(value) {
+                        return Ok(Self::Activity(Box::new(activity)));
+                    }
+                }
+                Ok(Self::Value(value.clone()))
+            }
+            _ => Err(Error::Object(
+                "activity object is not an id or object".into(),
+            )),
+        }
+    }
 }
 
 impl From<String> for ActivityObject {
@@ -126,6 +155,37 @@ impl From<&str> for ActivityObject {
 impl From<Value> for ActivityObject {
     fn from(value: Value) -> Self {
         Self::Value(value)
+    }
+}
+
+impl From<Activity> for ActivityObject {
+    fn from(value: Activity) -> Self {
+        Self::Activity(Box::new(value))
+    }
+}
+
+impl From<Box<Activity>> for ActivityObject {
+    fn from(value: Box<Activity>) -> Self {
+        Self::Activity(value)
+    }
+}
+
+impl Serialize for ActivityObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_json().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ActivityObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        Self::from_json(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -224,33 +284,7 @@ impl Activity {
         let object_value = value
             .get("object")
             .ok_or_else(|| Error::Object("activity has no object".into()))?;
-        let object = match object_value {
-            Value::String(id) => ActivityObject::Id(id.clone()),
-            Value::Object(_) => {
-                if object_value
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .is_some_and(|ty| {
-                        ty == "Follow"
-                            || ty == "Accept"
-                            || ty == "Reject"
-                            || ty == "Undo"
-                            || ty == "Create"
-                            || ty == "Update"
-                    })
-                    && object_value.get("actor").is_some()
-                {
-                    ActivityObject::Activity(Box::new(Self::from_json(object_value)?))
-                } else {
-                    ActivityObject::Value(object_value.clone())
-                }
-            }
-            _ => {
-                return Err(Error::Object(
-                    "activity object is not an id or object".into(),
-                ));
-            }
-        };
+        let object = ActivityObject::from_json(object_value)?;
         Ok(Self {
             id: string(value.get("id")),
             kind,
@@ -288,6 +322,25 @@ impl Activity {
             map.insert("cc".to_owned(), json!(self.cc));
         }
         value
+    }
+}
+
+impl Serialize for Activity {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_json().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Activity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        Self::from_json(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -393,5 +446,69 @@ mod tests {
         ] {
             assert_eq!(ActivityKind::parse(kind.as_str()), Some(kind));
         }
+    }
+
+    #[test]
+    fn delete_with_embedded_tombstone_parses_and_round_trips() {
+        let tombstone = json!({
+            "id": "https://mastodon.social/users/alice/statuses/123",
+            "type": "Tombstone",
+            "atomUri": "https://mastodon.social/users/alice/statuses/123"
+        });
+        let raw = json!({
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": "https://mastodon.social/users/alice/statuses/123/activity",
+            "type": "Delete",
+            "actor": "https://mastodon.social/users/alice",
+            "to": [PUBLIC],
+            "object": tombstone
+        });
+        let activity = Activity::from_json(&raw).expect("parse delete");
+        assert_eq!(activity.kind, ActivityKind::Delete);
+        assert_eq!(activity.actor, "https://mastodon.social/users/alice");
+        assert_eq!(
+            activity.id.as_deref(),
+            Some("https://mastodon.social/users/alice/statuses/123/activity")
+        );
+        assert_eq!(activity.to, vec![PUBLIC]);
+        assert_eq!(activity.object, ActivityObject::Value(tombstone));
+
+        let serialized: Value = serde_json::to_value(&activity).expect("serialize");
+        let deserialized: Activity = serde_json::from_value(serialized).expect("deserialize");
+        assert_eq!(deserialized, activity);
+    }
+
+    #[test]
+    fn delete_with_bare_string_id_parses_and_round_trips() {
+        let raw = json!({
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "type": "Delete",
+            "actor": "https://mastodon.social/users/alice",
+            "object": "https://mastodon.social/users/alice/statuses/123"
+        });
+        let activity: Activity = serde_json::from_value(raw).expect("parse delete");
+        assert_eq!(activity.kind, ActivityKind::Delete);
+        assert_eq!(
+            activity.object,
+            ActivityObject::Id("https://mastodon.social/users/alice/statuses/123".into())
+        );
+        let serialized = serde_json::to_value(&activity).expect("serialize");
+        let deserialized: Activity = serde_json::from_value(serialized).expect("deserialize");
+        assert_eq!(deserialized, activity);
+    }
+
+    #[test]
+    fn an_embedded_like_inside_undo_is_parsed() {
+        let value = json!({
+            "type": "Undo",
+            "actor": "https://a.example/users/a",
+            "object": {
+                "type": "Like",
+                "actor": "https://a.example/users/a",
+                "object": "https://b.example/notes/1"
+            }
+        });
+        let parsed = Activity::from_json(&value).expect("undo");
+        assert!(matches!(parsed.object, ActivityObject::Activity(_)));
     }
 }
