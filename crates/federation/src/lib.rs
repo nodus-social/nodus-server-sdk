@@ -8,6 +8,6 @@ pub mod activity;
 pub mod delivery;
 pub mod signature;
 
-pub use activity::Activity;
+pub use activity::{Activity, ActivityKind, ActivityObject};
 pub use delivery::{Delivery, DeliveryError, Inbox};
 pub use signature::{HttpSignature, SignatureError, Signer, Verifier};
