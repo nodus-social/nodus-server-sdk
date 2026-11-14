@@ -70,10 +70,14 @@ impl HttpSignature {
             }
         }
         Ok(Self {
-            key_id: key_id.ok_or(SignatureError::Missing("keyId"))?,
+            key_id: key_id
+                .filter(|id| !id.is_empty())
+                .ok_or(SignatureError::Missing("keyId"))?,
             algorithm: algorithm.unwrap_or_else(|| "rsa-sha256".to_owned()),
             headers: headers.unwrap_or_else(|| vec!["date".to_owned()]),
-            signature: signature.ok_or(SignatureError::Missing("signature"))?,
+            signature: signature
+                .filter(|sig| !sig.is_empty())
+                .ok_or(SignatureError::Missing("signature"))?,
         })
     }
 
@@ -363,6 +367,15 @@ mod tests {
     fn defaults_omitted_headers_to_date() {
         let signature = HttpSignature::parse(r#"keyId="k",signature="s""#).expect("signature");
         assert_eq!(signature.headers, ["date"]);
+    }
+
+    #[test]
+    fn rejects_empty_key_id_or_signature() {
+        let err = HttpSignature::parse(r#"keyId="",signature="s""#).unwrap_err();
+        assert!(matches!(err, SignatureError::Missing("keyId")));
+
+        let err = HttpSignature::parse(r#"keyId="k",signature="""#).unwrap_err();
+        assert!(matches!(err, SignatureError::Missing("signature")));
     }
 
     #[cfg(feature = "crypto")]

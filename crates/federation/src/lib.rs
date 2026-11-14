@@ -9,5 +9,7 @@ pub mod delivery;
 pub mod signature;
 
 pub use activity::{Activity, ActivityKind, ActivityObject};
-pub use delivery::{Delivery, DeliveryError, Inbox};
+pub use delivery::{
+    DEFAULT_MAX_CLOCK_SKEW, Delivery, DeliveryError, Inbox, REQUIRED_SIGNED_HEADERS, SignedRequest,
+};
 pub use signature::{HttpSignature, SignatureError, Signer, Verifier};
