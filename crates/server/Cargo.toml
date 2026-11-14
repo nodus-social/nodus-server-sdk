@@ -16,8 +16,8 @@ mastodon = ["dep:nodus-mastodon-sdk"]
 misskey = ["dep:nodus-misskey-sdk"]
 nodus = ["dep:nodus-performance-sdk"]
 service = ["dep:nodus-service-sdk"]
-native = ["nodus-activitypub-sdk/native", "nodus-federation/native"]
-crypto = ["nodus-federation/crypto"]
+native = ["nodus-activitypub-sdk?/native", "nodus-federation?/native"]
+crypto = ["nodus-federation?/crypto"]
 
 [dependencies]
 nodus-activitypub-sdk = { workspace = true, optional = true }
