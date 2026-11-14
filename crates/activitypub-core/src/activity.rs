@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::Error;
-use crate::actor::string;
+use crate::actor::{audience, link, string};
 use crate::context::activity_context;
 
 /// The activity verbs this crate can represent.
@@ -279,7 +279,7 @@ impl Activity {
             .ok_or_else(|| Error::Object("activity has no type".into()))?;
         let kind = ActivityKind::parse(&raw)
             .ok_or_else(|| Error::Object(format!("unsupported activity type: {raw}")))?;
-        let actor = string(value.get("actor"))
+        let actor = link(value.get("actor"))
             .ok_or_else(|| Error::Object("activity has no actor".into()))?;
         let object_value = value
             .get("object")
@@ -341,17 +341,6 @@ impl<'de> Deserialize<'de> for Activity {
     {
         let value = Value::deserialize(deserializer)?;
         Self::from_json(&value).map_err(serde::de::Error::custom)
-    }
-}
-
-fn audience(value: Option<&Value>) -> Vec<String> {
-    match value {
-        Some(Value::String(id)) => vec![id.clone()],
-        Some(Value::Array(items)) => items
-            .iter()
-            .filter_map(|item| item.as_str().map(str::to_owned))
-            .collect(),
-        _ => Vec::new(),
     }
 }
 
@@ -510,5 +499,75 @@ mod tests {
         });
         let parsed = Activity::from_json(&value).expect("undo");
         assert!(matches!(parsed.object, ActivityObject::Activity(_)));
+    }
+
+    #[test]
+    fn undo_of_like_announce_and_block_round_trip_as_activities() {
+        for inner_type in ["Like", "Announce", "Block"] {
+            let raw = json!({
+                "@context": "https://www.w3.org/ns/activitystreams",
+                "id": format!("https://a.example/activities/undo-{inner_type}"),
+                "type": "Undo",
+                "actor": "https://a.example/users/a",
+                "object": {
+                    "id": format!("https://a.example/activities/{inner_type}-1"),
+                    "type": inner_type,
+                    "actor": "https://a.example/users/a",
+                    "object": "https://b.example/notes/1"
+                }
+            });
+            let parsed = Activity::from_json(&raw).expect("parse undo");
+            assert!(
+                matches!(parsed.object, ActivityObject::Activity(_)),
+                "{inner_type} should parse as ActivityObject::Activity"
+            );
+            let round_tripped = Activity::from_json(&parsed.to_json()).expect("round trip");
+            assert_eq!(round_tripped, parsed);
+        }
+
+        let undo_with_object_actor = json!({
+            "type": "Undo",
+            "actor": { "id": "https://a.example/users/a", "type": "Person" },
+            "object": {
+                "type": "Announce",
+                "actor": { "id": "https://a.example/users/a", "type": "Person" },
+                "object": "https://b.example/notes/1"
+            }
+        });
+        let parsed = Activity::from_json(&undo_with_object_actor).expect("undo with object actor");
+        assert_eq!(parsed.actor, "https://a.example/users/a");
+        assert!(matches!(parsed.object, ActivityObject::Activity(_)));
+    }
+
+    #[test]
+    fn activity_from_json_accepts_object_and_link_actor_and_audience() {
+        let with_object_actor = json!({
+            "type": "Like",
+            "actor": { "id": "https://a.example/users/a", "type": "Person" },
+            "object": "https://b.example/notes/1",
+            "to": [
+                { "type": "Link", "href": PUBLIC },
+                { "id": "https://b.example/users/b" }
+            ],
+            "cc": { "type": "Link", "href": "https://a.example/users/a/followers" }
+        });
+        let parsed = Activity::from_json(&with_object_actor).expect("actor object");
+        assert_eq!(parsed.actor, "https://a.example/users/a");
+        assert_eq!(
+            parsed.to,
+            vec![PUBLIC.to_owned(), "https://b.example/users/b".to_owned()]
+        );
+        assert_eq!(
+            parsed.cc,
+            vec!["https://a.example/users/a/followers".to_owned()]
+        );
+
+        let with_link_actor = json!({
+            "type": "Follow",
+            "actor": { "type": "Link", "href": "https://a.example/users/a" },
+            "object": "https://b.example/users/b"
+        });
+        let parsed_link = Activity::from_json(&with_link_actor).expect("actor link");
+        assert_eq!(parsed_link.actor, "https://a.example/users/a");
     }
 }
