@@ -62,6 +62,8 @@ pub struct Actor {
     pub inbox: Option<String>,
     /// Shared inbox URL, when the actor advertises one.
     pub shared_inbox: Option<String>,
+    /// Key id for the actor's RSA public key (`publicKey.id`).
+    pub public_key_id: Option<String>,
     /// PEM-encoded RSA public key (`publicKey.publicKeyPem`).
     pub public_key_pem: Option<String>,
     /// RFC 3339 account creation time.
@@ -130,6 +132,11 @@ impl Actor {
                     .get("endpoints")
                     .and_then(|endpoints| endpoints.get("sharedInbox")),
             ),
+            public_key_id: value
+                .get("publicKey")
+                .and_then(|key| key.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             public_key_pem: value
                 .get("publicKey")
                 .and_then(|key| string(Some(key)))
@@ -210,10 +217,14 @@ impl Actor {
             map.insert("published".to_owned(), json!(published));
         }
         if let Some(pem) = &self.public_key_pem {
+            let key_id = self
+                .public_key_id
+                .clone()
+                .unwrap_or_else(|| format!("{}#main-key", self.id));
             map.insert(
                 "publicKey".to_owned(),
                 json!({
-                    "id": format!("{}#main-key", self.id),
+                    "id": key_id,
                     "owner": self.id,
                     "publicKeyPem": pem,
                 }),
@@ -266,25 +277,94 @@ pub(crate) fn total_items(value: Option<&Value>) -> u64 {
         .unwrap_or_default()
 }
 
+pub(crate) fn items(value: Option<&Value>) -> &[Value] {
+    match value {
+        Some(Value::Array(items)) => items.as_slice(),
+        Some(item @ Value::Object(_)) => std::slice::from_ref(item),
+        _ => &[],
+    }
+}
+
+pub(crate) fn audience(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items.iter().filter_map(|item| link(Some(item))).collect(),
+        Some(other) => link(Some(other)).into_iter().collect(),
+        None => Vec::new(),
+    }
+}
+
+pub(crate) fn parse_emoji(item: &Value) -> Option<Emoji> {
+    if item.get("type").and_then(Value::as_str) != Some("Emoji") {
+        return None;
+    }
+    let shortcode = item.get("name").and_then(Value::as_str)?.to_owned();
+    let url = item.get("icon").and_then(|icon| link(Some(icon)))?;
+    Some(Emoji { shortcode, url })
+}
+
 pub(crate) fn emojis(value: Option<&Value>) -> Vec<Emoji> {
-    let Some(Value::Array(items)) = value else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("Emoji"))
-        .filter_map(|item| {
-            let shortcode = item.get("name").and_then(Value::as_str)?.to_owned();
-            let url = item
-                .get("icon")
-                .and_then(|icon| link(Some(icon)))
-                .or_else(|| {
-                    item.get("icon")
-                        .and_then(|icon| icon.get("url"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                })?;
-            Some(Emoji { shortcode, url })
-        })
-        .collect()
+    items(value).iter().filter_map(parse_emoji).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_public_key_id_is_preserved_on_round_trip() {
+        let raw = json!({
+            "id": "https://gts.example/users/alice",
+            "type": "Person",
+            "preferredUsername": "alice",
+            "publicKey": {
+                "id": "https://gts.example/users/alice/main-key",
+                "owner": "https://gts.example/users/alice",
+                "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----"
+            }
+        });
+        let actor = Actor::from_json(&raw).expect("parse actor");
+        assert_eq!(
+            actor.public_key_id.as_deref(),
+            Some("https://gts.example/users/alice/main-key")
+        );
+        let serialized = actor.to_json();
+        assert_eq!(
+            serialized["publicKey"]["id"],
+            "https://gts.example/users/alice/main-key"
+        );
+        let round_tripped = Actor::from_json(&serialized).expect("round trip");
+        assert_eq!(round_tripped, actor);
+    }
+
+    #[test]
+    fn actor_defaults_public_key_id_when_absent() {
+        let raw = json!({
+            "id": "https://a.example/users/alice",
+            "type": "Person",
+            "preferredUsername": "alice",
+            "publicKey": {
+                "owner": "https://a.example/users/alice",
+                "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nTEST\n-----END PUBLIC KEY-----"
+            }
+        });
+        let actor = Actor::from_json(&raw).expect("parse actor");
+        assert_eq!(actor.public_key_id, None);
+        assert_eq!(
+            actor.to_json()["publicKey"]["id"],
+            "https://a.example/users/alice#main-key"
+        );
+    }
+
+    #[test]
+    fn emojis_accepts_single_object_tag() {
+        let single = json!({
+            "type": "Emoji",
+            "name": ":blobcat:",
+            "icon": { "type": "Image", "url": "https://a.example/emoji/blobcat.png" }
+        });
+        let parsed = emojis(Some(&single));
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].shortcode, ":blobcat:");
+        assert_eq!(parsed[0].url, "https://a.example/emoji/blobcat.png");
+    }
 }
