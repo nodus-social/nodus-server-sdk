@@ -711,6 +711,9 @@ dependencies = [
 name = "nodus-activitypub-client"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "http",
+ "http-body",
  "nodus-activitypub-core",
  "reqwest",
  "serde_json",

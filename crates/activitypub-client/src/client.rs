@@ -9,6 +9,9 @@ use url::Url;
 use nodus_activitypub_core::actor::link;
 use nodus_activitypub_core::{Actor, Collection, CollectionPage, Error, Note};
 
+/// Maximum permitted HTTP response body size (4 MiB).
+const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 /// A read-only ActivityPub client.
 #[derive(Debug, Clone)]
 pub struct ActivityPub {
@@ -57,10 +60,7 @@ impl ActivityPub {
                 url: url.to_owned(),
             });
         }
-        response
-            .json()
-            .await
-            .map_err(|error| Error::Transport(error.to_string()))
+        read_json_limited(response, MAX_RESPONSE_BYTES).await
     }
 
     /// Resolve `user@host` to its actor URL.
@@ -392,6 +392,40 @@ impl reqwest::dns::Resolve for SafeDnsResolver {
             Ok(iter)
         })
     }
+}
+
+/// Read and parse a JSON response body without exceeding `max_bytes`.
+async fn read_json_limited(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Value, Error> {
+    let max_u64 = u64::try_from(max_bytes).unwrap_or(u64::MAX);
+    let content_length = response.content_length();
+    if let Some(len) = content_length.filter(|&len| len > max_u64) {
+        return Err(Error::Transport(format!(
+            "response body of {len} bytes exceeds {max_bytes} byte limit"
+        )));
+    }
+
+    let initial_cap = content_length
+        .and_then(|len| usize::try_from(len).ok())
+        .map_or(0, |len| len.min(64 * 1024).min(max_bytes));
+    let mut body = Vec::with_capacity(initial_cap);
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| Error::Transport(error.to_string()))?
+    {
+        if chunk.len() > max_bytes - body.len() {
+            return Err(Error::Transport(format!(
+                "response body exceeded {max_bytes} byte limit"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    serde_json::from_slice(&body).map_err(|error| Error::Transport(error.to_string()))
 }
 
 /// The URL a note object points at, when callers only have a page.
@@ -736,5 +770,151 @@ mod tests {
         assert!(block_on(resolver.resolve("10.0.0.1".parse().unwrap())).is_err());
         assert!(block_on(resolver.resolve("169.254.169.254".parse().unwrap())).is_err());
         assert!(block_on(resolver.resolve("[::1]".parse().unwrap())).is_err());
+    }
+
+    struct ChunkedBody {
+        chunks: std::collections::VecDeque<bytes::Bytes>,
+        advertised_size: Option<u64>,
+        polls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl http_body::Body for ChunkedBody {
+        type Data = bytes::Bytes;
+        type Error = std::io::Error;
+
+        fn poll_frame(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            let this = self.get_mut();
+            match this.chunks.pop_front() {
+                Some(chunk) => {
+                    this.polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    std::task::Poll::Ready(Some(Ok(http_body::Frame::data(chunk))))
+                }
+                None => std::task::Poll::Ready(None),
+            }
+        }
+
+        fn size_hint(&self) -> http_body::SizeHint {
+            match self.advertised_size {
+                Some(len) => http_body::SizeHint::with_exact(len),
+                None => http_body::SizeHint::default(),
+            }
+        }
+    }
+
+    fn build_test_response(
+        content_length: Option<usize>,
+        chunks: Vec<bytes::Bytes>,
+    ) -> (reqwest::Response, Arc<std::sync::atomic::AtomicUsize>) {
+        let polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let advertised_size = content_length.map(|len| u64::try_from(len).unwrap_or(u64::MAX));
+        let body = reqwest::Body::wrap(ChunkedBody {
+            chunks: chunks.into(),
+            advertised_size,
+            polls: Arc::clone(&polls),
+        });
+        let mut builder = http::Response::builder().status(200);
+        if let Some(len) = content_length {
+            builder = builder.header(http::header::CONTENT_LENGTH, len.to_string());
+        }
+        let http_res = builder.body(body).unwrap();
+        (reqwest::Response::from(http_res), polls)
+    }
+
+    fn make_json_payload(total_len: usize) -> Vec<u8> {
+        // Build `{"k":"aaa..."}` of exact length `total_len` (requires total_len >= 9).
+        let prefix = b"{\"k\":\"";
+        let suffix = b"\"}";
+        let pad_len = total_len - prefix.len() - suffix.len();
+        let mut out = Vec::with_capacity(total_len);
+        out.extend_from_slice(prefix);
+        out.resize(prefix.len() + pad_len, b'a');
+        out.extend_from_slice(suffix);
+        out
+    }
+
+    #[test]
+    fn read_json_limited_rejects_oversized_content_length() {
+        let payload = bytes::Bytes::from(make_json_payload(1025));
+        let (response, polls) = build_test_response(Some(payload.len()), vec![payload]);
+        let err = block_on(read_json_limited(response, 1024)).unwrap_err();
+        assert!(
+            matches!(err, Error::Transport(_)),
+            "expected Transport error, got {err:?}"
+        );
+        assert_eq!(
+            polls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "body should not be polled when Content-Length exceeds limit"
+        );
+
+        let (max_res, max_polls) = build_test_response(Some(MAX_RESPONSE_BYTES + 1), vec![]);
+        let max_err = block_on(read_json_limited(max_res, MAX_RESPONSE_BYTES)).unwrap_err();
+        assert!(matches!(max_err, Error::Transport(_)));
+        assert_eq!(max_polls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn read_json_limited_rejects_oversized_chunked_body_without_content_length() {
+        let payload = make_json_payload(1500);
+        let chunks: Vec<bytes::Bytes> = payload
+            .chunks(300)
+            .map(bytes::Bytes::copy_from_slice)
+            .collect();
+        assert_eq!(chunks.len(), 5);
+
+        let (response, polls) = build_test_response(None, chunks);
+        let err = block_on(read_json_limited(response, 1024)).unwrap_err();
+        assert!(
+            matches!(err, Error::Transport(_)),
+            "expected Transport error, got {err:?}"
+        );
+        assert_eq!(
+            polls.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "streaming should stop as soon as accumulated bytes exceed limit"
+        );
+    }
+
+    #[test]
+    fn read_json_limited_rejects_spoofed_small_content_length() {
+        let payload = make_json_payload(1500);
+        let chunks: Vec<bytes::Bytes> = payload
+            .chunks(300)
+            .map(bytes::Bytes::copy_from_slice)
+            .collect();
+        let (response, polls) = build_test_response(Some(16), chunks);
+        let err = block_on(read_json_limited(response, 1024)).unwrap_err();
+        assert!(
+            matches!(err, Error::Transport(_)),
+            "expected Transport error, got {err:?}"
+        );
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn read_json_limited_accepts_chunked_json_at_exact_limit() {
+        let payload = make_json_payload(1024);
+        let chunks: Vec<bytes::Bytes> = payload
+            .chunks(256)
+            .map(bytes::Bytes::copy_from_slice)
+            .collect();
+        let (response, polls) = build_test_response(None, chunks);
+        let value = block_on(read_json_limited(response, 1024)).expect("exact limit should pass");
+        assert_eq!(
+            value.get("k").and_then(Value::as_str).map(str::len),
+            Some(1024 - 8)
+        );
+        assert_eq!(polls.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn read_json_limited_rejects_invalid_json_within_limit() {
+        let (response, _polls) =
+            build_test_response(Some(14), vec![bytes::Bytes::from_static(b"not valid json")]);
+        let err = block_on(read_json_limited(response, 1024)).unwrap_err();
+        assert!(matches!(err, Error::Transport(_)));
     }
 }
