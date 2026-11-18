@@ -114,10 +114,11 @@ is 1 MiB (`api/activitypub.rs:99`).
 | Retry of inbound | sender retries on non-2xx | we retry nothing; `202` is returned even for ignored kinds | ok | `api/activitypub.rs:268-288` |
 | Response body | empty | empty | ok | `api/activitypub.rs:268-288` |
 
-Inbound `Note` ingestion loses most of the object: no `tag` (mentions/hashtags/emoji), no
-`attachment`, no `to`/`cc` audience, and the row is stored with `visibility = 'public'` no matter
-what the sender claimed (`store/statuses.rs:114-146`). Mentions and tags do exist locally for
-local posts (`api/statuses.rs:558,588`) but are only used to build client JSON (`api/dto.rs:441-470`).
+Inbound `Note` ingestion keeps `tag` (mentions, hashtags, custom emoji) and `attachment`
+(media URLs), stores the visibility its addressing states, and serves tags/mentions/emojis
+through the status DTO (`api/activitypub.rs`, `store_note_extras`; `api/statuses.rs`,
+`decorate`). A peer `Question` is stored as a poll (`api/activitypub.rs`,
+`store_note_poll`).
 
 ## 4. Collections
 
@@ -181,7 +182,7 @@ remote side has nothing to attach them to (`api/outbox.rs:239-268`).
 | attachment `url` + `icon` | distinct (preview) | identical `/media/{id}` | cosmetic | `api/activitypub.rs:743-744` |
 | `blurhash`, `focalPoint` | yes | missing, though the media row carries `blurhash` | visible | `store/media.rs:21`; `api/activitypub.rs:733-749` |
 | `contentMap`/`language`, `conversation`, `atomUri` | yes | missing | cosmetic | `apcore/note.rs:56-89` |
-| `Question`/polls | yes | unsupported in and out | blocker | `api/dto.rs:277` |
+| `Question`/polls | yes | inbound stored as a read-only poll; outbound unsupported (compose has no polls) | visible | `api/activitypub.rs`, `store_note_poll` |
 | `Article`/`Video` objects | rendered | `Note::from_json` accepts any `type`, fields dropped; `Announce` (object as URL) never fetched | visible | `apcore/note.rs:114-151`; `api/activitypub.rs:402-404` |
 
 ## 7. Fetch-on-demand
@@ -236,7 +237,7 @@ Only `GET /api/v1/hydrate/account` and `GET /api/v1/hydrate/status` exist (`api/
 | 4 | blocker | Every `Undo` (and its inner activity) gets a fresh id, so unfollow/unfavourite/unboost are ignored by the peer | `api/outbox.rs:41-66` | Unfollow a Mastodon account: `POST /api/v1/accounts/{id}/unfollow` → `Undo{object.id}` must equal the `Follow.id` sent earlier (same `federation_delivery` row id) |
 | 5 | blocker | Replies, DMs and mention fan-out never federate (visibility gate + followers-only recipients) | `api/outbox.rs:101-110,143-150` | Reply to a remote user: `POST /api/v1/statuses` → expect a `Create` in the mentioned actor's inbox (not just followers) |
 | 6 | blocker | Inbound `Like`, `Announce`, `Update`, `Move`, `Block`, `Flag` are silently dropped, so remote favourites/boosts of our posts never register | `api/activitypub.rs:363-405` | Peer favourites our post: `POST /inbox {Like, object: our note}` → `favourites_count` becomes 1 and a `favourite` notification appears; same for `Announce` → `reblogs_count` |
-| 7 | blocker | Ingested notes hardcode `visibility='public'` and drop `tag`/`attachment`/audience | `store/statuses.rs:114-146`; `api/activitypub.rs:629-687` | Hydrate a followers-only remote post: `GET /api/v1/hydrate/status?url=…` → stored visibility must stay `private`, its images/mentions must survive |
+| 7 | visible | Outbound `Create` still drops audience nuance; inbound now keeps `tag`/`attachment` and the stated visibility | `store/statuses.rs:114-146`; `api/activitypub.rs`, `store_note_extras` | Hydrate a followers-only remote post: `GET /api/v1/hydrate/status?url=…` → stored visibility must stay `private`, its images/mentions must survive |
 | 8 | blocker | Outbound `Create` advertises no `tag` at all, so mentioned users are never notified by the peer and hashtags never link | `api/activitypub.rs:767` | Mention `@bob@remote`: our `Create` must contain `tag:[{type:Mention,href:…}]`; the remote must show/notify the mention |
 | 9 | blocker | All outbound reads are unsigned, so AUTHORIZED_FETCH instances refuse our actor/outbox fetches | `client/client.rs:1,52` | Fetch a Mastodon 4.3+ actor with `AUTHORIZED_FETCH=on`: our `ActivityPub::actor_url` returns 401 and hydration fails |
 | 10 | blocker | Our `GET`s are unsigned too, so we cannot resolve or hydrate from authorized-fetch peers; no thread fetch at all | `api/hydrate.rs:77-117`; `api/hydrate.rs` (no replies/ancestors) | `GET /api/v1/hydrate/account?acct=user@authfetch.test` → 200 with the outbox page, and a reply to a remote post shows its parent chain |
@@ -249,7 +250,7 @@ Only `GET /api/v1/hydrate/account` and `GET /api/v1/hydrate/status` exist (`api/
 | 17 | visible | User blocks and reports are not federated (`Block`, `Flag` never sent; inbound `Block` ignored) | `api/accounts.rs:292-303`; `api/admin/reports.rs` | Block a remote account: the peer receives `Block` and drops the follow; peer sends `Block` → our follow row disappears |
 | 18 | visible | Domain-block `silence` behaves exactly like `suspend`; `reject_media`/`reject_reports` are inert | `store/moderation.rs:341-347`; `api/activitypub.rs:422-430` | Block a domain with `severity=silence, reject_reports=true`, then `POST /inbox {Create}` → expect 202 (accepted, hidden), and a report about that domain → 422 |
 | 19 | visible | Signature policy is stricter than the ecosystem: `rsa-sha256` only, ±12 min, digest mandatory, no RFC 9421/ed25519 | `be-fed/lib.rs:23,26,178-222` | Mastodon 4.4 with an ed25519 key posts a `Follow` → expect 202; today it is 401 `unsupported algorithm` |
-| 20 | visible | Inbound notes lose attachments and inbound `Create` from a `Question`/`Article` degrades to a bare text `Note` | `api/activitypub.rs:629-687` | `POST /inbox {Create{Question}}` → status with `poll` (unsupported today) |
+| 20 | visible | Inbound `Create{Question}` becomes a poll, but `Article` still degrades to a bare text `Note`; outbound `Question` is unsupported | `api/activitypub.rs` | `POST /inbox {Create{Question}}` → status with `poll` carrying the peer's options/counts |
 | 21 | cosmetic | No NodeInfo, no host-meta, no `Vary: Accept`, no `Content-Type` negotiation, no ETag on actors | §1 table | `GET /.well-known/nodeinfo` → 200 `{"links":[{"rel":"…/2.0","href":…}]}` |
 | 22 | cosmetic | `Note.url` (`/@{user}/{id}`) and `Actor.url` (`/@{user}`) are not API routes | `api/activitypub.rs:754,842` | `GET /@alice` → 200 HTML profile (must be served by the web front end) |
 | 23 | cosmetic | No `blurhash`/`focalPoint` on attachments; audio typed `Document`; preview == full-size URL | `api/activitypub.rs:733-749` | `GET /statuses/{id}` for a post with an image + blurhash → attachment carries `blurhash` |
@@ -264,7 +265,7 @@ Only `GET /api/v1/hydrate/account` and `GET /api/v1/hydrate/status` exist (`api/
 4. `Undo` re-mints ids → unfollow/unfav/unboost silently ignored.
 5. Only public/unlisted `Create`s go to followers → replies and DMs never federate.
 6. `Like`/`Announce`/`Update`/`Move`/`Block`/`Flag` inbound are dropped wholesale.
-7. Inbound notes are forced public and lose attachments/tags/audience.
+7. Outbound notes carry no `tag`, so remote mentions never notify (inbound tags do survive).
 8. Outbound notes carry no `tag`, so remote mentions never notify.
 9. Our fetches are unsigned → authorized-fetch peers 401 us.
 10. No thread/ancestor fetch; `replies` URL is a 404.
@@ -291,15 +292,34 @@ Fixed and deployed:
 - replies and direct messages are delivered: the note carries its mentions, `to`/`cc`
   follow the visibility, and delivery includes the mentioned inboxes (a direct post goes
   only to them);
-- an inbound note is stored with the visibility its addressing states, instead of `public`.
+- an inbound note is stored with the visibility its addressing states, instead of `public`;
+- an ingested note keeps its `tag` (`Mention`, `Hashtag`, `Emoji`) and `attachment`
+  list: hashtags and mentions have their own rows, custom emoji are stored in
+  `status_emoji`, and media is recorded as the peer's URL, so a remote post renders the
+  same shape as a local one (`crates/api/src/activitypub.rs`, `store_note_extras`).
 
 Still open:
 
 - `Update`, `Move`, `Block`, `Flag` and a remote `Delete` are dropped by
   `ingest_activity`'s catch-all;
-- an ingested note loses its `tag`/`attachment` list, so mentions and media from a peer do
-  not appear on our side;
 - no live authorized-fetch peer has confirmed our `Signature`: the request is signed, the
   acceptance is not;
 - `server-sdk/crates/federation` is dead code: the server uses
   `nodus-backend/crates/federation`.
+
+## Poll voting
+
+Local polls are live: `GET /api/v1/polls/{id}` returns the poll document, and
+`POST /api/v1/polls/{id}/votes` (Mastodon's form-encoded `choices[]`) records one vote per
+account per option, so a retried vote never double-counts. A poll on a remote status is
+read-only: voting on it is refused with `422` "Validation failed: this poll belongs to
+another instance".
+
+An inbound `Question` — or a `Note` whose `attachment` or inline `oneOf` carries one — is
+now stored as the same `poll`/`poll_vote` rows local polls use, with `oneOf`/`anyOf`
+(single vs multiple), `endTime` mapped to `expires_at`, and the peer's per-option counts
+and `votersCount` kept in `poll_tally`/`poll.voters_count`. `GET /api/v1/polls/{id}`
+serves it, and a later `Update` replaces those counts instead of adding to them.
+
+Still not implemented: outbound `Question` (compose cannot create polls yet), poll
+notifications, and casting a vote here for a poll that lives on another instance.
