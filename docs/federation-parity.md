@@ -272,6 +272,15 @@ Only `GET /api/v1/hydrate/account` and `GET /api/v1/hydrate/status` exist (`api/
 
 ## Status after the first pass
 
+Signed but unverified: delivery signing already existed before this pass
+(`nodus-backend/crates/api/src/outbox.rs`, per-account key), and outbound reads are now
+signed as well — `nodus-backend/crates/api/src/state.rs` loads one instance key from
+`NODUS_FEDERATION_KEY_PATH` (or `NODUS_FEDERATION_KEY`) and
+`crates/api/src/activitypub.rs` serves the matching `{instance}/actor` with
+`publicKey.id = {instance}/actor#main-key`. That removes the authorized-fetch 401 in
+principle; no live peer has confirmed it accepts our signature yet, and an instance with
+no key still reads unsigned.
+
 Fixed and deployed:
 
 - an inbound `Follow` is answered with an `Accept` naming the follow it answers
@@ -290,7 +299,7 @@ Still open:
   `ingest_activity`'s catch-all;
 - an ingested note loses its `tag`/`attachment` list, so mentions and media from a peer do
   not appear on our side;
-- the outgoing HTTP client signs nothing, so an instance with authorized fetch on refuses
-  the request;
+- no live authorized-fetch peer has confirmed our `Signature`: the request is signed, the
+  acceptance is not;
 - `server-sdk/crates/federation` is dead code: the server uses
   `nodus-backend/crates/federation`.
