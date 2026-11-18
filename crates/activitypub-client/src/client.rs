@@ -1,11 +1,13 @@
-//! Public reads over HTTPS. No signing, no delivery.
+//! Public reads over HTTPS, signed when a key is configured.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
+use chrono::Utc;
 use serde_json::Value;
 use url::Url;
 
+use crate::signing::HttpSigner;
 use nodus_activitypub_core::actor::link;
 use nodus_activitypub_core::{Actor, Collection, CollectionPage, Error, Note};
 
@@ -16,6 +18,7 @@ const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Debug, Clone)]
 pub struct ActivityPub {
     client: reqwest::Client,
+    signer: Option<HttpSigner>,
 }
 
 impl Default for ActivityPub {
@@ -35,21 +38,42 @@ impl ActivityPub {
             .dns_resolver(Arc::new(SafeDnsResolver))
             .build()
             .unwrap_or_default();
-        Self { client }
+        Self {
+            client,
+            signer: None,
+        }
     }
 
     /// Construct an ActivityPub client using an existing `reqwest::Client`.
     #[must_use]
     pub fn from_client(client: reqwest::Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            signer: None,
+        }
+    }
+
+    /// Sign every outbound request with `signer`.
+    #[must_use]
+    pub fn with_signer(mut self, signer: HttpSigner) -> Self {
+        self.signer = Some(signer);
+        self
     }
 
     async fn get(&self, url: &str) -> Result<Value, Error> {
         check(url)?;
-        let response = self
+        let parsed = Url::parse(url).map_err(|_| Error::Url(url.to_owned()))?;
+        let mut request = self
             .client
-            .get(url)
-            .header("accept", "application/activity+json, application/ld+json")
+            .get(parsed.clone())
+            .header("accept", "application/activity+json, application/ld+json");
+        if let Some(signer) = &self.signer {
+            let headers = signer
+                .sign("GET", &parsed, None, Utc::now())
+                .map_err(|error| Error::Transport(format!("request signing failed: {error}")))?;
+            request = headers.apply(request);
+        }
+        let response = request
             .send()
             .await
             .map_err(|error| Error::Transport(error.to_string()))?;

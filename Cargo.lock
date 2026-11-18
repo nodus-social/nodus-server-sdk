@@ -712,9 +712,11 @@ name = "nodus-activitypub-client"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chrono",
  "http",
  "http-body",
  "nodus-activitypub-core",
+ "nodus-federation",
  "reqwest",
  "serde_json",
  "url",
